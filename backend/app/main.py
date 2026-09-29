@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from app.auth.router import router as auth_router
+from app.config import get_settings
 from app.db import engine
 from app.ingestion.router import router as documents_router
 from app.retrieval.router import router as search_router
@@ -23,13 +24,23 @@ app.include_router(search_router)
 
 @app.get("/healthz")
 async def healthz() -> JSONResponse:
+    settings = get_settings()
+    # Only whether each integration is configured — never any part of a value.
+    configured = {
+        "gemini": settings.gemini_api_key is not None,
+        "groq": settings.groq_api_key is not None,
+        "discord": settings.discord_webhook_url is not None,
+    }
     try:
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
     except Exception:
         # Don't leak connection details; just report the dependency as down.
-        return JSONResponse({"status": "degraded", "db": "unreachable"}, status_code=503)
-    return JSONResponse({"status": "ok", "db": "ok"})
+        return JSONResponse(
+            {"status": "degraded", "db": "unreachable", "configured": configured},
+            status_code=503,
+        )
+    return JSONResponse({"status": "ok", "db": "ok", "configured": configured})
 
 
 if STATIC_DIR.is_dir():
