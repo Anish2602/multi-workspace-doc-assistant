@@ -22,6 +22,21 @@ class Settings(BaseSettings):
     jwt_ttl_hours: int = 24 * 7
     cookie_name: str = "mwda_session"
 
+    # LLM / embeddings (free tiers). Keys are optional so tests/dev boot without them.
+    gemini_api_key: SecretStr | None = None
+    groq_api_key: SecretStr | None = None
+    embedding_model: str = "gemini-embedding-001"
+    # Tried in order on timeout / 429 / 5xx. Pinned versions, not -latest aliases.
+    gemini_chat_models: list[str] = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
+    groq_chat_model: str = "openai/gpt-oss-120b"
+    llm_timeout_seconds: float = 30.0
+
+    # Tool side effects
+    discord_webhook_url: SecretStr | None = None
+
+    # Ingestion
+    max_upload_bytes: int = 10 * 1024 * 1024
+
     @property
     def is_production(self) -> bool:
         return self.env == "production"
@@ -32,13 +47,15 @@ class Settings(BaseSettings):
             raise ValueError("JWT_SECRET must be set in production")
         return self
 
-    @field_validator("database_url", mode="before")
+    @field_validator(
+        "database_url", "gemini_api_key", "groq_api_key", "discord_webhook_url", mode="before"
+    )
     @classmethod
     def _strip_quotes(cls, value: object) -> object:
         # Dashboards (Neon's copy button, Render's env UI) often carry the value
         # wrapped in quotes; `.env` parsing strips them but Docker/Render don't.
         if isinstance(value, str):
-            return value.strip().strip("'\"").strip()
+            return value.strip().strip("'\"").strip() or None
         return value
 
     @property

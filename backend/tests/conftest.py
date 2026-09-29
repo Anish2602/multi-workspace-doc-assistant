@@ -11,8 +11,10 @@ from sqlalchemy.pool import NullPool
 
 from app.config import to_asyncpg_url
 from app.db import get_session
+from app.llm.embeddings import get_embedder
 from app.main import app
 from app.models import Base
+from tests.fakes import FakeEmbedder
 
 TEST_DATABASE_URL = to_asyncpg_url(
     os.environ.get("TEST_DATABASE_URL", "postgresql://postgres:postgres@localhost:5433/mwda_test")
@@ -45,12 +47,18 @@ async def session(sessionmaker) -> AsyncIterator[AsyncSession]:
 
 
 @pytest.fixture
-async def client(sessionmaker) -> AsyncIterator[AsyncClient]:
+def embedder() -> FakeEmbedder:
+    return FakeEmbedder()
+
+
+@pytest.fixture
+async def client(sessionmaker, embedder) -> AsyncIterator[AsyncClient]:
     async def override() -> AsyncIterator[AsyncSession]:
         async with sessionmaker() as s:
             yield s
 
     app.dependency_overrides[get_session] = override
+    app.dependency_overrides[get_embedder] = lambda: embedder
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
     app.dependency_overrides.clear()
@@ -60,3 +68,13 @@ async def signup(client: AsyncClient, email: str, password: str = "password123")
     r = await client.post("/api/auth/signup", json={"email": email, "password": password})
     assert r.status_code == 201, r.text
     return r.json()
+
+
+async def first_workspace_id(client: AsyncClient) -> str:
+    return (await client.get("/api/workspaces")).json()[0]["id"]
+
+
+async def upload(client: AsyncClient, workspace_id: str, name: str, data: bytes):
+    return await client.post(
+        f"/api/workspaces/{workspace_id}/documents", files={"file": (name, data)}
+    )
