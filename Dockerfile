@@ -24,5 +24,5 @@ USER appuser
 
 ENV PATH="/app/.venv/bin:$PATH"
 EXPOSE 8000
-# Render injects $PORT; default to 8000 locally.
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips='*'"]
+# Apply pending migrations, then serve. Render injects $PORT; default to 8000 locally.
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips='*'"]
