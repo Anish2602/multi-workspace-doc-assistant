@@ -53,3 +53,13 @@ docker build -t mwda . && docker run --env-file .env -p 8000:8000 mwda
 - Every new behaviour on the quality bar (isolation, idempotency, tool validation,
   injection, refusal) gets a test.
 - Small, focused commits with descriptive messages.
+
+## Before pushing
+
+Unit tests run with dev dependencies installed, so they can't catch a runtime
+dependency missing from the production image (this bit us twice). CI builds and
+boots the real image; locally:
+
+```bash
+docker build -t mwda . && docker run --rm --entrypoint python mwda -c "import app.main"
+```
