@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: multi-workspace-doc-assistant
+    runtime: docker
+    plan: free
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        sync: false   # set in the Render dashboard; never committed
