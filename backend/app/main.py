@@ -8,6 +8,7 @@ from sqlalchemy import text
 from app.auth.router import router as auth_router
 from app.db import engine
 from app.ingestion.router import router as documents_router
+from app.retrieval.router import router as search_router
 from app.workspaces.router import router as workspaces_router
 
 # Built frontend (copied here by the Dockerfile). Absent during backend-only dev.
@@ -17,6 +18,7 @@ app = FastAPI(title="Multi-Workspace Document Assistant")
 app.include_router(auth_router)
 app.include_router(workspaces_router)
 app.include_router(documents_router)
+app.include_router(search_router)
 
 
 @app.get("/healthz")
