@@ -3,6 +3,7 @@ services:
     name: multi-workspace-doc-assistant
     runtime: docker
     plan: free
+    region: singapore   # same region as the Neon database
     healthCheckPath: /healthz
     autoDeploy: true
     envVars:
