@@ -67,7 +67,13 @@ async def test_search_in_foreign_workspace_is_404(client):
 
 
 async def _seed_big_and_small_workspace(session, embedder: FakeEmbedder):
-    """Workspace BIG: 300 chunks all about cats. Workspace SMALL: 1 chunk about budgets."""
+    """Workspace BIG: 300 chunks all about cats. Workspace SMALL: 1 chunk about budgets.
+
+    SMALL's chunk shares one word ("cat") with the query: it ranks below all 300 BIG
+    chunks (so a naive filtered HNSW scan misses it) but isn't orthogonal to every
+    other vector. A fully orthogonal vector can end up unreachable in the HNSW
+    graph, which made an earlier version of this test flaky.
+    """
     user = User(email=f"{uuid.uuid4()}@example.com", password_hash="x")
     session.add(user)
     await session.flush()
@@ -102,7 +108,7 @@ async def _seed_big_and_small_workspace(session, embedder: FakeEmbedder):
         )
 
     await add(big, [f"cats cat kitten feline whiskers note {i}" for i in range(300)])
-    await add(small, ["quarterly budget spreadsheet totals"])
+    await add(small, ["cat food budget spreadsheet totals"])
     await session.commit()
     return big, small
 
@@ -149,5 +155,5 @@ async def test_hnsw_filter_pitfall_is_real_and_iterative_scan_fixes_it(session, 
     # and never a BIG chunk.
     await _force_hnsw_plan(session)
     result = await search(session, embedder, small_id, "cat kitten", hybrid=False)
-    assert [c.content for c in result.chunks] == ["quarterly budget spreadsheet totals"]
+    assert [c.content for c in result.chunks] == ["cat food budget spreadsheet totals"]
     await session.rollback()
