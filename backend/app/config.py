@@ -7,7 +7,7 @@ reprs or logs by accident.
 from functools import lru_cache
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from pydantic import SecretStr, field_validator
+from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -16,6 +16,21 @@ class Settings(BaseSettings):
 
     env: str = "development"
     database_url: SecretStr = SecretStr("postgresql://postgres:postgres@localhost:5432/mwda")
+
+    # Auth. JWT_SECRET must be set in production (Render generates one).
+    jwt_secret: SecretStr = SecretStr("dev-only-insecure-secret-change-me")
+    jwt_ttl_hours: int = 24 * 7
+    cookie_name: str = "mwda_session"
+
+    @property
+    def is_production(self) -> bool:
+        return self.env == "production"
+
+    @model_validator(mode="after")
+    def _require_real_secret_in_production(self) -> "Settings":
+        if self.is_production and self.jwt_secret.get_secret_value().startswith("dev-only"):
+            raise ValueError("JWT_SECRET must be set in production")
+        return self
 
     @field_validator("database_url", mode="before")
     @classmethod

@@ -1,0 +1,1 @@
+CREATE DATABASE mwda_test;
