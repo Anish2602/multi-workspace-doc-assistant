@@ -1,4 +1,13 @@
-from app.config import to_asyncpg_url
+import pytest
+
+from app.config import Settings, to_asyncpg_url
+
+
+@pytest.mark.parametrize("wrapped", ['"{u}"', "'{u}'", "  {u}\n"])
+def test_database_url_tolerates_quotes_and_whitespace(wrapped):
+    url = "postgresql://u:p@ep-x.neon.tech/db?sslmode=require"
+    settings = Settings(database_url=wrapped.format(u=url), _env_file=None)
+    assert settings.async_database_url == "postgresql+asyncpg://u:p@ep-x.neon.tech/db?ssl=require"
 
 
 def test_neon_url_is_converted_for_asyncpg():

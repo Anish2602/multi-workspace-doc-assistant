@@ -7,7 +7,7 @@ reprs or logs by accident.
 from functools import lru_cache
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from pydantic import SecretStr
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -16,6 +16,15 @@ class Settings(BaseSettings):
 
     env: str = "development"
     database_url: SecretStr = SecretStr("postgresql://postgres:postgres@localhost:5432/mwda")
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def _strip_quotes(cls, value: object) -> object:
+        # Dashboards (Neon's copy button, Render's env UI) often carry the value
+        # wrapped in quotes; `.env` parsing strips them but Docker/Render don't.
+        if isinstance(value, str):
+            return value.strip().strip("'\"").strip()
+        return value
 
     @property
     def async_database_url(self) -> str:
