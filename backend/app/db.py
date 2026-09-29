@@ -13,6 +13,11 @@ engine = create_async_engine(
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
+def get_sessionmaker() -> async_sessionmaker[AsyncSession]:
+    """Dependency for code that must own its session's lifetime (e.g. SSE streams)."""
+    return SessionLocal
+
+
 async def get_session() -> AsyncIterator[AsyncSession]:
     async with SessionLocal() as session:
         yield session

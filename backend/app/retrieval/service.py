@@ -31,9 +31,13 @@ from app.llm.embeddings import Embedder
 RRF_K = 60
 CANDIDATES_PER_LEG = 20
 DEFAULT_TOP_K = 6
-# Below this cosine similarity the best chunk isn't considered evidence at all,
-# and the chat answers "I don't know" without calling the LLM.
-MIN_SIMILARITY = 0.55
+# Chunks below this cosine similarity are not shown to the LLM as evidence.
+# Calibrated on the sample corpus with gemini-embedding-001 (768-d): questions the
+# workspace answers scored 0.69-0.78, questions it doesn't (other workspace's facts,
+# general knowledge) scored 0.53-0.56. 0.62 sits in the gap.
+MIN_SIMILARITY = 0.62
+# The top keyword hit (exact names/codes) may be this much below MIN_SIMILARITY.
+KEYWORD_SLACK = 0.04
 
 
 @dataclass
@@ -183,3 +187,18 @@ async def search(
         top_similarity=max(similarity.values(), default=None),
         latency_ms=int((time.perf_counter() - started) * 1000),
     )
+
+
+def relevant_chunks(result: RetrievalResult) -> list[RetrievedChunk]:
+    """Chunks good enough to show the LLM as evidence.
+
+    A chunk qualifies on vector similarity, or if it is the top keyword match and
+    reasonably close semantically (exact names/codes). Everything else is dropped so
+    the model can't be tempted to build an answer on unrelated text.
+    """
+    return [
+        c
+        for c in result.chunks
+        if (c.similarity is not None and c.similarity >= MIN_SIMILARITY)
+        or (c.keyword_rank == 1 and (c.similarity or 0) >= MIN_SIMILARITY - KEYWORD_SLACK)
+    ]

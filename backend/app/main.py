@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from app.auth.router import router as auth_router
+from app.chat.router import router as chat_router
 from app.config import get_settings
 from app.db import engine
 from app.ingestion.router import router as documents_router
@@ -20,6 +21,7 @@ app.include_router(auth_router)
 app.include_router(workspaces_router)
 app.include_router(documents_router)
 app.include_router(search_router)
+app.include_router(chat_router)
 
 
 @app.get("/healthz")

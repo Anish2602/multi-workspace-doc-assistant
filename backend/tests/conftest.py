@@ -9,12 +9,13 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from app.chat.router import _chat_model
 from app.config import to_asyncpg_url
-from app.db import get_session
+from app.db import get_session, get_sessionmaker
 from app.llm.embeddings import get_embedder
 from app.main import app
 from app.models import Base
-from tests.fakes import FakeEmbedder
+from tests.fakes import FakeChat, FakeEmbedder
 
 TEST_DATABASE_URL = to_asyncpg_url(
     os.environ.get("TEST_DATABASE_URL", "postgresql://postgres:postgres@localhost:5433/mwda_test")
@@ -52,13 +53,20 @@ def embedder() -> FakeEmbedder:
 
 
 @pytest.fixture
-async def client(sessionmaker, embedder) -> AsyncIterator[AsyncClient]:
+def chat_model() -> FakeChat:
+    return FakeChat()
+
+
+@pytest.fixture
+async def client(sessionmaker, embedder, chat_model) -> AsyncIterator[AsyncClient]:
     async def override() -> AsyncIterator[AsyncSession]:
         async with sessionmaker() as s:
             yield s
 
     app.dependency_overrides[get_session] = override
+    app.dependency_overrides[get_sessionmaker] = lambda: sessionmaker
     app.dependency_overrides[get_embedder] = lambda: embedder
+    app.dependency_overrides[_chat_model] = lambda: chat_model
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
     app.dependency_overrides.clear()
