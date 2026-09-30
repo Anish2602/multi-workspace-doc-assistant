@@ -100,3 +100,14 @@ prompt-injection sample document.
 | Day 2 Eve | Hardening + tests (all quality-bar checks) |
 | Day 3 AM | Stretch: debug view, streaming, hybrid, stats |
 | Day 3 PM | Seed, README, AI_NOTES, final live check, submit (+buffer) |
+
+## What changed during the build
+
+- Chunks are ~1,000 characters (~250 tokens) rather than ~800 tokens: tighter
+  citations for short policy/spec documents.
+- Models are pinned after probing: `gemini-3.5-flash-lite` → `gemini-3.1-flash-lite`
+  → Groq `openai/gpt-oss-120b` (`gemini-2.5-flash` is unavailable to new keys).
+- Evidence threshold calibrated to 0.62 (see README).
+- Demo login is `demo@example.com` (`.test` fails email validation).
+- Added: CI that boots the production image, token streaming, stats endpoint.
+- Not built: cross-workspace sharing (stretch goal).
