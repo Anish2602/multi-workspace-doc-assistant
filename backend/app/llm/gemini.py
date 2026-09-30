@@ -1,7 +1,10 @@
 import json
+from collections.abc import Callable
+
+import httpx
 
 from app.config import get_settings
-from app.llm.http import ProviderError, post_json
+from app.llm.http import RETRYABLE_STATUS, ProviderError, _describe, get_http_client, post_json
 from app.llm.types import ChatMessage, ChatResult, ToolCallRequest, ToolSpec
 
 _BASE = "https://generativelanguage.googleapis.com/v1beta/models"
@@ -49,9 +52,7 @@ class GeminiChat:
             c.pop("_tool_results", None)
         return contents
 
-    async def complete(
-        self, system: str, messages: list[ChatMessage], tools: list[ToolSpec]
-    ) -> ChatResult:
+    def _body(self, system: str, messages: list[ChatMessage], tools: list[ToolSpec]) -> dict:
         body: dict = {
             "systemInstruction": {"parts": [{"text": system}]},
             "contents": self._contents(messages),
@@ -70,18 +71,9 @@ class GeminiChat:
                     ]
                 }
             ]
-        data = await post_json(
-            "gemini",
-            f"{_BASE}/{self._model}:generateContent",
-            headers=self._headers,
-            json=body,
-            request_timeout=self._timeout,
-        )
-        candidates = data.get("candidates") or []
-        if not candidates or "content" not in candidates[0]:
-            reason = (candidates[0].get("finishReason") if candidates else None) or "no candidates"
-            raise ProviderError("gemini", f"empty response ({reason})", retryable=True)
-        parts = candidates[0]["content"].get("parts", [])
+        return body
+
+    def _result(self, parts: list[dict], usage: dict) -> ChatResult:
         text = "".join(p.get("text", "") for p in parts if not p.get("thought"))
         calls = [
             ToolCallRequest(
@@ -93,7 +85,6 @@ class GeminiChat:
             for i, p in enumerate(parts)
             if "functionCall" in p
         ]
-        usage = data.get("usageMetadata", {})
         return ChatResult(
             text=text,
             tool_calls=calls,
@@ -102,3 +93,74 @@ class GeminiChat:
             completion_tokens=usage.get("candidatesTokenCount", 0),
             provider_raw={"provider": "gemini", "parts": parts},
         )
+
+    async def complete(
+        self, system: str, messages: list[ChatMessage], tools: list[ToolSpec]
+    ) -> ChatResult:
+        data = await post_json(
+            "gemini",
+            f"{_BASE}/{self._model}:generateContent",
+            headers=self._headers,
+            json=self._body(system, messages, tools),
+            request_timeout=self._timeout,
+        )
+        candidates = data.get("candidates") or []
+        if not candidates or "content" not in candidates[0]:
+            reason = (candidates[0].get("finishReason") if candidates else None) or "no candidates"
+            raise ProviderError("gemini", f"empty response ({reason})", retryable=True)
+        return self._result(
+            candidates[0]["content"].get("parts", []), data.get("usageMetadata", {})
+        )
+
+    async def stream(
+        self,
+        system: str,
+        messages: list[ChatMessage],
+        tools: list[ToolSpec],
+        on_token: Callable[[str], None],
+    ) -> ChatResult:
+        """Token streaming via SSE. Text deltas go to `on_token` as they arrive.
+
+        Every part carrying a thoughtSignature is kept: when streaming, Gemini sends
+        the signature on a trailing *empty* text part, and dropping it breaks the
+        next tool-calling round with a 400.
+        """
+        parts: list[dict] = []
+        usage: dict = {}
+        try:
+            async with get_http_client().stream(
+                "POST",
+                f"{_BASE}/{self._model}:streamGenerateContent",
+                params={"alt": "sse"},
+                headers=self._headers,
+                json=self._body(system, messages, tools),
+                timeout=self._timeout,
+            ) as response:
+                if response.status_code != 200:
+                    await response.aread()
+                    raise ProviderError(
+                        "gemini",
+                        _describe(response),
+                        retryable=response.status_code in RETRYABLE_STATUS,
+                    )
+                async for line in response.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    chunk = json.loads(line[6:])
+                    usage = chunk.get("usageMetadata", usage)
+                    candidates = chunk.get("candidates") or []
+                    if not candidates:
+                        continue
+                    for part in candidates[0].get("content", {}).get("parts", []):
+                        text = part.get("text", "")
+                        if text and not part.get("thought"):
+                            on_token(text)
+                        if text or "thoughtSignature" in part or "functionCall" in part:
+                            parts.append(part)
+        except httpx.TimeoutException:
+            raise ProviderError("gemini", "stream timed out", retryable=True) from None
+        except httpx.HTTPError as exc:
+            raise ProviderError("gemini", f"stream error ({type(exc).__name__})", True) from None
+        if not parts:
+            raise ProviderError("gemini", "empty streamed response", retryable=True)
+        return self._result(parts, usage)

@@ -7,7 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.auth.deps import CurrentUser, SessionDep
@@ -301,3 +301,58 @@ async def list_tasks(workspace: ActiveWorkspace, session: SessionDep) -> list[di
         }
         for t in rows
     ]
+
+
+@router.get("/stats")
+async def workspace_stats(workspace: ActiveWorkspace, session: SessionDep) -> dict:
+    """Observability for the active workspace: volume, latency, tokens, hits, tools."""
+    ws = workspace.id
+    msg = (
+        await session.execute(
+            select(
+                func.count().filter(Message.status == "done"),
+                func.count().filter(Message.status == "failed"),
+                func.avg(Message.latency_ms).filter(Message.status == "done"),
+                func.percentile_cont(0.95)
+                .within_group(Message.latency_ms)
+                .filter(Message.status == "done"),
+                func.coalesce(func.sum(Message.prompt_tokens), 0),
+                func.coalesce(func.sum(Message.completion_tokens), 0),
+            ).where(Message.workspace_id == ws, Message.role == "assistant")
+        )
+    ).one()
+    hits = (
+        await session.execute(
+            select(func.count(), func.count().filter(RetrievalLog.hit)).where(
+                RetrievalLog.workspace_id == ws
+            )
+        )
+    ).one()
+    tools: dict[str, dict[str, int]] = {}
+    for name, status_, n in await session.execute(
+        select(ToolCall.tool_name, ToolCall.status, func.count())
+        .where(ToolCall.workspace_id == ws)
+        .group_by(ToolCall.tool_name, ToolCall.status)
+    ):
+        tools.setdefault(name, {})[status_] = n
+    models = dict(
+        (
+            await session.execute(
+                select(Message.model, func.count())
+                .where(Message.workspace_id == ws, Message.model.is_not(None))
+                .group_by(Message.model)
+            )
+        ).all()
+    )
+    return {
+        "messages": msg[0] + msg[1],
+        "answered": msg[0],
+        "failed": msg[1],
+        "avg_latency_ms": round(msg[2]) if msg[2] is not None else None,
+        "p95_latency_ms": round(msg[3]) if msg[3] is not None else None,
+        "prompt_tokens": int(msg[4]),
+        "completion_tokens": int(msg[5]),
+        "retrieval_hit_rate": (hits[1] / hits[0]) if hits[0] else None,
+        "tool_calls": tools,
+        "models": models,
+    }

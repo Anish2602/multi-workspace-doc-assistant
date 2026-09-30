@@ -1,6 +1,7 @@
 """Chat model with provider fallback: Gemini (pinned models, in order), then Groq."""
 
 import logging
+from collections.abc import Callable
 
 from app.config import get_settings
 from app.llm.gemini import GeminiChat
@@ -42,6 +43,39 @@ class FallbackChat:
             except ProviderError as exc:
                 log.warning("chat model %s failed: %s", model.name, exc)
                 errors.append(str(exc))
+        raise AllProvidersFailed(errors)
+
+    async def stream(
+        self,
+        system: str,
+        messages: list[ChatMessage],
+        tools: list[ToolSpec],
+        on_token: Callable[[str], None],
+        on_reset: Callable[[], None],
+    ) -> ChatResult:
+        """Stream from the first model that supports it; fall back like `complete`.
+
+        If a model fails after emitting tokens, `on_reset` tells the client to
+        discard the partial text before the next model starts.
+        """
+        errors: list[str] = []
+        for model in self.models:
+            emitted = False
+
+            def forward(text: str) -> None:
+                nonlocal emitted
+                emitted = True
+                on_token(text)
+
+            try:
+                if hasattr(model, "stream"):
+                    return await model.stream(system, messages, tools, forward)
+                return await model.complete(system, messages, tools)
+            except ProviderError as exc:
+                log.warning("chat model %s failed: %s", model.name, exc)
+                errors.append(str(exc))
+                if emitted:
+                    on_reset()
         raise AllProvidersFailed(errors)
 
 

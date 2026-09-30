@@ -1,25 +1,30 @@
 import { useEffect, useState } from 'react'
-
-type Health = { status: string; db: string }
+import { api, type User } from './api'
+import Dashboard from './components/Dashboard'
+import Login from './components/Login'
 
 export default function App() {
-  const [health, setHealth] = useState<Health | null>(null)
+  const [user, setUser] = useState<User | null | undefined>(undefined)
 
   useEffect(() => {
-    fetch('/healthz')
-      .then((r) => r.json())
-      .then(setHealth)
-      .catch(() => setHealth({ status: 'unreachable', db: 'unknown' }))
+    api.me().then(setUser).catch(() => setUser(null))
   }, [])
 
-  return (
-    <main className="min-h-screen bg-slate-50 text-slate-900 flex items-center justify-center p-4">
-      <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h1 className="text-xl font-semibold">Multi-Workspace Document Assistant</h1>
-        <p className="mt-2 text-sm text-slate-600">
-          API: {health ? health.status : 'checking…'} · Database: {health ? health.db : '…'}
-        </p>
+  if (user === undefined) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 text-sm text-slate-500">
+        Loading… (the free server may take up to a minute to wake up)
       </div>
-    </main>
+    )
+  }
+  if (user === null) return <Login onAuthenticated={setUser} />
+  return (
+    <Dashboard
+      user={user}
+      onLogout={async () => {
+        await api.logout().catch(() => undefined)
+        setUser(null)
+      }}
+    />
   )
 }

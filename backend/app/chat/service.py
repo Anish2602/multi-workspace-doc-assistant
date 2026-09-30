@@ -7,6 +7,7 @@ Ordering guarantees:
   be retried and reuses the same rows.
 """
 
+import asyncio
 import json
 import re
 import time
@@ -38,7 +39,7 @@ _CITATION = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")
 
 @dataclass
 class TurnEvent:
-    type: str  # retrieval | tool_call | answer | error
+    type: str  # retrieval | token | reset | tool_call | answer | error
     data: dict[str, Any]
 
 
@@ -71,6 +72,69 @@ def clean_citations(text: str, sources: SourceRegistry) -> tuple[str, list[dict]
     cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
     cleaned = re.sub(r"[ \t]+([.,;:])", r"\1", cleaned).strip()
     return cleaned, [used[n] for n in sorted(used)]
+
+
+class _ModelCall:
+    """Run one model round, surfacing streamed tokens as events while it runs.
+
+    Models with `stream()` push text deltas into a queue from a background task;
+    `events()` drains the queue until the task finishes. Models without it (e.g.
+    test fakes) just complete normally.
+    """
+
+    _RESET = object()
+
+    def __init__(self, chat: ChatModel, system: str, messages: list, tools: list) -> None:
+        self.chat, self.system, self.messages, self.tools = chat, system, messages, tools
+        self.result = None
+        self.error: Exception | None = None
+
+    async def events(self) -> AsyncIterator[TurnEvent]:
+        if not hasattr(self.chat, "stream"):
+            try:
+                self.result = await self.chat.complete(self.system, self.messages, self.tools)
+            except (AllProvidersFailed, ProviderError) as exc:
+                self.error = exc
+            return
+
+        queue: asyncio.Queue = asyncio.Queue()
+        task = asyncio.create_task(
+            self.chat.stream(
+                self.system,
+                self.messages,
+                self.tools,
+                on_token=queue.put_nowait,
+                on_reset=lambda: queue.put_nowait(self._RESET),
+            )
+        )
+        try:
+            while True:
+                getter = asyncio.ensure_future(queue.get())
+                done, _ = await asyncio.wait({getter, task}, return_when=asyncio.FIRST_COMPLETED)
+                if getter in done:
+                    item = getter.result()
+                    yield (
+                        TurnEvent("reset", {})
+                        if item is self._RESET
+                        else TurnEvent("token", {"text": item})
+                    )
+                    continue
+                getter.cancel()
+                while not queue.empty():  # tokens that raced the task's completion
+                    item = queue.get_nowait()
+                    yield (
+                        TurnEvent("reset", {})
+                        if item is self._RESET
+                        else TurnEvent("token", {"text": item})
+                    )
+                break
+            try:
+                self.result = task.result()
+            except (AllProvidersFailed, ProviderError) as exc:
+                self.error = exc
+        finally:
+            if not task.done():  # client disconnected mid-stream
+                task.cancel()
 
 
 async def start_turn(
@@ -192,11 +256,13 @@ async def run_turn(
         for round_no in range(MAX_TOOL_ROUNDS + 1):
             # Last round: no tools offered, forcing a final answer.
             offer = tools if round_no < MAX_TOOL_ROUNDS else []
-            try:
-                reply = await chat.complete(system, messages, offer)
-            except (AllProvidersFailed, ProviderError) as exc:
-                yield await fail(f"llm: {exc}")
+            call = _ModelCall(chat, system, messages, offer)
+            async for event in call.events():
+                yield event
+            if call.error is not None:
+                yield await fail(f"llm: {call.error}")
                 return
+            reply = call.result
             model_used = reply.model
             prompt_tokens += reply.prompt_tokens
             completion_tokens += reply.completion_tokens

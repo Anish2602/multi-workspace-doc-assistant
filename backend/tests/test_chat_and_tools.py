@@ -323,3 +323,85 @@ async def test_tool_call_log_row_exists_even_if_tool_crashes(
     assert "exploded" not in json.dumps(body)  # internal detail not leaked to model/user
     rows = (await session.scalars(select(ToolCall))).all()
     assert [r.status for r in rows] == ["error"]
+
+
+async def test_stats_reflect_turns_tools_and_hits(client, chat_model):
+    ws = await setup_ws(client, "stats@example.com", ("hr.md", HR_DOC))
+    chat_model.script(
+        reply("", ("save_task", {"title": "Good task"}), ("nope_tool", {})),
+        reply("24 days [1]."),
+    )
+    await ask(client, ws, "How many days of annual leave?")
+    chat_model.script(outage())
+    await ask(client, ws, "again?")
+    stats = (await client.get(f"/api/workspaces/{ws}/stats")).json()
+    assert stats["answered"] == 1 and stats["failed"] == 1
+    assert stats["prompt_tokens"] == 20 and stats["completion_tokens"] == 10
+    assert stats["tool_calls"] == {"save_task": {"success": 1}, "nope_tool": {"unknown_tool": 1}}
+    assert stats["retrieval_hit_rate"] == 0.5  # "again?" matches nothing: a real miss
+    assert stats["models"] == {"fake/scripted": 1}
+
+
+# --- token streaming -----------------------------------------------------------------------
+
+
+class _StreamingModel:
+    """A model with stream(): emits tokens, optionally dies part-way through."""
+
+    def __init__(self, name: str, text: str, fail_after: int | None = None):
+        self.name, self.text, self.fail_after = name, text, fail_after
+
+    async def complete(self, system, messages, tools):
+        raise AssertionError("streaming path should be used")
+
+    async def stream(self, system, messages, tools, on_token):
+        from app.llm.http import ProviderError
+
+        for i, word in enumerate(self.text.split(" ")):
+            if self.fail_after is not None and i == self.fail_after:
+                raise ProviderError("fake", "connection dropped mid-stream", retryable=True)
+            on_token(word + " ")
+        r = reply(self.text)
+        r.model = self.name
+        return r
+
+
+def _events(r) -> list[dict]:
+    return [json.loads(line[6:]) for line in r.text.splitlines() if line.startswith("data: ")]
+
+
+async def test_tokens_stream_before_the_final_answer(client):
+    from app.chat.router import _chat_model
+    from app.llm.chat import FallbackChat
+
+    app.dependency_overrides[_chat_model] = lambda: FallbackChat(
+        [_StreamingModel("fake/a", "Employees get 24 days [1].")]
+    )
+    ws = await setup_ws(client, "stream1@example.com", ("hr.md", HR_DOC))
+    r = await client.post(f"/api/workspaces/{ws}/chat/stream", json={"message": "leave days?"})
+    events = _events(r)
+    tokens = [e["text"] for e in events if e["type"] == "token"]
+    assert "".join(tokens).strip() == "Employees get 24 days [1]."
+    types = [e["type"] for e in events]
+    assert types.index("token") < types.index("answer")
+    assert events[-1]["model"] == "fake/a"
+
+
+async def test_mid_stream_failure_resets_and_falls_back(client):
+    from app.chat.router import _chat_model
+    from app.llm.chat import FallbackChat
+
+    app.dependency_overrides[_chat_model] = lambda: FallbackChat(
+        [
+            _StreamingModel("fake/flaky", "This answer will be cut off here", fail_after=3),
+            _StreamingModel("fake/backup", "24 days [1]."),
+        ]
+    )
+    ws = await setup_ws(client, "stream2@example.com", ("hr.md", HR_DOC))
+    r = await client.post(f"/api/workspaces/{ws}/chat/stream", json={"message": "leave days?"})
+    types = [e["type"] for e in _events(r)]
+    assert "reset" in types
+    after_reset = "".join(e.get("text", "") for e in _events(r)[types.index("reset") + 1 :])
+    assert "cut off" not in after_reset and "24 days" in after_reset
+    assert _events(r)[-1]["content"] == "24 days [1]."
+    assert _events(r)[-1]["model"] == "fake/backup"
