@@ -405,3 +405,29 @@ async def test_mid_stream_failure_resets_and_falls_back(client):
     assert "cut off" not in after_reset and "24 days" in after_reset
     assert _events(r)[-1]["content"] == "24 days [1]."
     assert _events(r)[-1]["model"] == "fake/backup"
+
+
+# --- Discord tool --------------------------------------------------------------------------
+
+
+async def test_discord_post_is_scoped_labelled_and_cannot_ping(client, chat_model, discord):
+    ws = await setup_ws(client, "discord@example.com")
+    chat_model.script(
+        reply("", ("send_discord_summary", {"summary": "Beta is 14 Nov @everyone"})),
+        reply("Posted."),
+    )
+    body = await ask(client, ws, "post a summary to discord")
+    assert body["tool_calls"][0]["status"] == "success"
+    [post] = discord.posts
+    assert post["json"]["content"] == "**[My Workspace]** Beta is 14 Nov @everyone"
+    assert post["json"]["allowed_mentions"] == {"parse": []}  # no @everyone/@here pings
+
+
+async def test_discord_failure_is_reported_without_leaking_webhook(client, chat_model, discord):
+    discord.status_code = 404
+    ws = await setup_ws(client, "discord2@example.com")
+    chat_model.script(reply("", ("send_discord_summary", {"summary": "hi"})), reply("It failed."))
+    body = await ask(client, ws, "post to discord")
+    call = body["tool_calls"][0]
+    assert call["status"] == "error" and "HTTP 404" in call["result"]["error"]
+    assert "discord.invalid" not in json.dumps(body)

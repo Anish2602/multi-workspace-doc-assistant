@@ -4,8 +4,10 @@ import os
 import re
 from collections.abc import AsyncIterator
 
+import httpx
 import pytest
 from httpx import ASGITransport, AsyncClient
+from pydantic import SecretStr
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
@@ -21,6 +23,46 @@ from tests.fakes import FakeChat, FakeEmbedder
 TEST_DATABASE_URL = to_asyncpg_url(
     os.environ.get("TEST_DATABASE_URL", "postgresql://postgres:postgres@localhost:5433/mwda_test")
 )
+
+
+@pytest.fixture(autouse=True)
+def _no_real_network(monkeypatch):
+    """Tests must never reach real services (they once posted to our real Discord).
+
+    Any outbound HTTP through httpx's network transports fails loudly. The in-process
+    ASGI transport used to call the app is unaffected.
+    """
+
+    def blocked(self, request, *args, **kwargs):
+        raise RuntimeError(f"Real network call attempted in tests: {request.url.host}")
+
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", blocked)
+    monkeypatch.setattr(httpx.HTTPTransport, "handle_request", blocked)
+
+
+class FakeDiscord:
+    """Records what the send_discord_summary tool would have posted."""
+
+    def __init__(self) -> None:
+        self.posts: list[dict] = []
+        self.status_code = 204
+
+    async def post(self, url, json=None, **_kwargs):
+        self.posts.append({"url": url, "json": json})
+        return httpx.Response(self.status_code)
+
+
+@pytest.fixture(autouse=True)
+def discord(monkeypatch) -> FakeDiscord:
+    from app.config import get_settings
+    from app.tools import builtin
+
+    fake = FakeDiscord()
+    monkeypatch.setattr(
+        get_settings(), "discord_webhook_url", SecretStr("https://discord.invalid/webhook")
+    )
+    monkeypatch.setattr(builtin, "get_http_client", lambda: fake)
+    return fake
 
 
 @pytest.fixture(scope="session")
