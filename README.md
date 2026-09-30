@@ -15,7 +15,8 @@ pgvector table**; isolation is enforced inside the SQL of every query.
 
 ## Try it (for reviewers)
 
-**Demo login:** `demo@example.com` / `demo-password-2026` (throwaway account, fictional data)
+**Demo login:** username `demo` (or email `demo@example.com`) / password `demo-password-2026`
+(throwaway account, fictional data)
 
 | Workspace | Documents |
 |---|---|
@@ -24,7 +25,7 @@ pgvector table**; isolation is enforced inside the SQL of every query.
 | My Workspace | empty — upload your own files here |
 
 The demo account is shared, so you may see other reviewers' chats. For a clean slate,
-create your own account (any email + 8-char password) and upload the files from
+create your own account (email, a username, and an 8+ character password entered twice) and upload the files from
 [`sample_docs/`](sample_docs) into two workspaces.
 
 ### Suggested questions
@@ -52,7 +53,8 @@ Re-upload a file to see it detected as a duplicate (no new chunks).
 
 ```
 React (Vite, TS, Tailwind) ──►  FastAPI  (one Render web service, also serves the SPA)
-                                  ├─ auth         email+password, argon2, JWT in httpOnly cookie
+                                  ├─ auth         sign up with email + username; sign in with either;
+                                  │               argon2, JWT in httpOnly cookie
                                   ├─ workspaces   membership check gates every /workspaces/{id}/… route
                                   ├─ ingestion    parse → chunk → embed → one transaction
                                   ├─ retrieval    hybrid (pgvector + Postgres FTS), workspace filter in SQL
@@ -84,6 +86,16 @@ React (Vite, TS, Tailwind) ──►  FastAPI  (one Render web service, also ser
   `tests/test_retrieval_isolation.py` forces the HNSW plan, shows the naive query
   returning nothing, and shows our search returning the right chunk. (For selective
   filters Postgres usually uses the btree index and sorts exactly — also covered.)
+
+### Accounts
+
+Sign-up asks for email, a username and the password twice; the server re-checks the
+confirmation (the API never trusts the browser for it). Usernames are 3–30 characters
+of letters, digits, `.`, `-`, `_` — never `@`, which is how sign-in tells a username
+from an email — and unique case-insensitively (`Anish` = `anish`). The username is
+shown across the dashboard. Login errors are identical for an unknown account and a
+wrong password. Existing accounts were given usernames by a migration that derives
+them from the email and de-duplicates collisions.
 
 ### Ingestion
 

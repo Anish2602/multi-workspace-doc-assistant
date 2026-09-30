@@ -1,7 +1,7 @@
 // Thin client for the FastAPI backend. Same origin in prod and dev (Vite proxy),
 // so the httpOnly session cookie is sent automatically; no tokens touch JS.
 
-export type User = { id: string; email: string }
+export type User = { id: string; email: string; username: string }
 export type Workspace = { id: string; name: string; created_at: string }
 export type DocumentInfo = {
   id: string
@@ -142,10 +142,11 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
 export const api = {
   me: () => request<User>('GET', '/auth/me'),
-  login: (email: string, password: string) =>
-    request<User>('POST', '/auth/login', { email, password }),
-  signup: (email: string, password: string) =>
-    request<User>('POST', '/auth/signup', { email, password }),
+  /** `identifier` is an email address or a username. */
+  login: (identifier: string, password: string) =>
+    request<User>('POST', '/auth/login', { identifier, password }),
+  signup: (body: { email: string; username: string; password: string; confirm_password: string }) =>
+    request<User>('POST', '/auth/signup', body),
   logout: () => request<void>('POST', '/auth/logout'),
 
   workspaces: () => request<Workspace[]>('GET', '/workspaces'),

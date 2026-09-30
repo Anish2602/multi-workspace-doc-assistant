@@ -74,7 +74,9 @@ async def _seed_big_and_small_workspace(session, embedder: FakeEmbedder):
     other vector. A fully orthogonal vector can end up unreachable in the HNSW
     graph, which made an earlier version of this test flaky.
     """
-    user = User(email=f"{uuid.uuid4()}@example.com", password_hash="x")
+    user = User(
+        email=f"{uuid.uuid4()}@example.com", username=uuid.uuid4().hex[:12], password_hash="x"
+    )
     session.add(user)
     await session.flush()
     big, small = Workspace(name="big", owner_id=user.id), Workspace(name="small", owner_id=user.id)

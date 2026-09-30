@@ -16,6 +16,7 @@ from pathlib import Path
 import httpx
 
 DEMO_EMAIL = "demo@example.com"
+DEMO_USERNAME = "demo"
 DEMO_PASSWORD = "demo-password-2026"
 SAMPLES = Path(__file__).resolve().parent.parent / "sample_docs"
 
@@ -40,10 +41,19 @@ def main() -> int:
 
     # Free-tier hosts can take ~60s to wake up.
     with httpx.Client(base_url=args.base_url.rstrip("/"), timeout=120) as client:
-        creds = {"email": DEMO_EMAIL, "password": DEMO_PASSWORD}
-        r = client.post("/api/auth/login", json=creds)
+        r = client.post(
+            "/api/auth/login", json={"identifier": DEMO_USERNAME, "password": DEMO_PASSWORD}
+        )
         if r.status_code == 401:
-            r = client.post("/api/auth/signup", json=creds)
+            r = client.post(
+                "/api/auth/signup",
+                json={
+                    "email": DEMO_EMAIL,
+                    "username": DEMO_USERNAME,
+                    "password": DEMO_PASSWORD,
+                    "confirm_password": DEMO_PASSWORD,
+                },
+            )
             print("created demo account")
         r.raise_for_status()
 
@@ -64,7 +74,7 @@ def main() -> int:
                 body = r.json()
                 state = "already present" if body["duplicate"] else f"{body['document']['chunk_count']} chunks"
                 print(f"  {name} <- {path.name}: {state}")
-    print(f"\nDemo login: {DEMO_EMAIL} / {DEMO_PASSWORD}")
+    print(f"\nDemo login: {DEMO_USERNAME} (or {DEMO_EMAIL}) / {DEMO_PASSWORD}")
     return 0
 
 

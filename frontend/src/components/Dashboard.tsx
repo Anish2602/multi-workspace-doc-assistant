@@ -70,7 +70,17 @@ export default function Dashboard({ user, onLogout }: { user: User; onLogout: ()
           }}
         />
         <div className="ml-auto flex items-center gap-3 text-sm">
-          <span className="hidden text-slate-500 md:inline">{user.email}</span>
+          <div className="flex items-center gap-2" title={user.email}>
+            <span
+              aria-hidden
+              className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-xs font-semibold uppercase text-indigo-700"
+            >
+              {user.username.charAt(0)}
+            </span>
+            <span className="hidden max-w-[12rem] truncate font-medium text-slate-700 sm:inline">
+              {user.username}
+            </span>
+          </div>
           <button
             onClick={onLogout}
             className="rounded-lg border border-slate-200 px-3 py-1.5 text-slate-700 hover:bg-slate-50"
@@ -87,7 +97,7 @@ export default function Dashboard({ user, onLogout }: { user: User; onLogout: ()
         // (messages, streams, panels) can carry over from the previous workspace.
         <div key={active.id} className="flex min-h-0 flex-1 flex-col lg:flex-row">
           <section className="flex min-h-0 flex-1 flex-col">
-            <Chat workspace={active} onTurnFinished={refresh} />
+            <Chat workspace={active} username={user.username} onTurnFinished={refresh} />
           </section>
           <aside className="flex max-h-[45vh] min-h-0 flex-col border-t border-slate-200 bg-white lg:max-h-none lg:w-[400px] lg:border-l lg:border-t-0">
             <nav className="flex border-b border-slate-200 text-sm">

@@ -26,9 +26,11 @@ function toolLabel(name: string, status: string): LiveStep {
 
 export default function Chat({
   workspace,
+  username,
   onTurnFinished,
 }: {
   workspace: Workspace
+  username: string
   onTurnFinished: () => void
 }) {
   const [messages, setMessages] = useState<Message[]>([])
@@ -148,7 +150,9 @@ export default function Chat({
         <div className="mx-auto max-w-3xl space-y-5">
           {messages.length === 0 && !busy && (
             <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-center">
-              <h2 className="font-semibold">Ask about “{workspace.name}”</h2>
+              <h2 className="font-semibold">
+                Hi {username}, ask about “{workspace.name}”
+              </h2>
               <p className="mt-1 text-sm text-slate-500">
                 Answers come only from this workspace's documents, with citations. Upload
                 documents in the panel, then try:
@@ -169,7 +173,8 @@ export default function Chat({
 
           {messages.map((m) =>
             m.role === 'user' ? (
-              <div key={m.id} className="flex justify-end">
+              <div key={m.id} className="flex flex-col items-end">
+                <span className="mb-1 mr-1 text-xs text-slate-400">{username}</span>
                 <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-indigo-600 px-4 py-2.5 text-sm text-white">
                   {m.content}
                 </div>

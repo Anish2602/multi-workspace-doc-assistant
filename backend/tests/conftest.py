@@ -1,6 +1,7 @@
 """Test fixtures: a real Postgres + pgvector (docker compose `db`), fresh per test."""
 
 import os
+import re
 from collections.abc import AsyncIterator
 
 import pytest
@@ -72,8 +73,22 @@ async def client(sessionmaker, embedder, chat_model) -> AsyncIterator[AsyncClien
     app.dependency_overrides.clear()
 
 
-async def signup(client: AsyncClient, email: str, password: str = "password123") -> dict:
-    r = await client.post("/api/auth/signup", json={"email": email, "password": password})
+def username_for(email: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]", "", email.split("@")[0])[:30].ljust(3, "0")
+
+
+async def signup(
+    client: AsyncClient, email: str, password: str = "password123", username: str | None = None
+) -> dict:
+    r = await client.post(
+        "/api/auth/signup",
+        json={
+            "email": email,
+            "username": username or username_for(email),
+            "password": password,
+            "confirm_password": password,
+        },
+    )
     assert r.status_code == 201, r.text
     return r.json()
 

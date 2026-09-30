@@ -20,6 +20,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -50,9 +51,15 @@ def _workspace_fk() -> Mapped[uuid.UUID]:
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        # Case-insensitive uniqueness: "Anish" and "anish" are the same username.
+        Index("uq_users_username_lower", func.lower(text("username")), unique=True),
+    )
 
     id: Mapped[uuid.UUID] = _pk()
     email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False)
+    # Display name shown across the dashboard; also accepted at login.
+    username: Mapped[str] = mapped_column(String(30), nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = _created_at()
 
